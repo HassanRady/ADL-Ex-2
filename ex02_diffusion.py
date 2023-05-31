@@ -17,7 +17,11 @@ def cosine_beta_schedule(timesteps, s=0.008):
     cosine schedule as proposed in https://arxiv.org/abs/2102.09672
     """
     # TODO (2.3): Implement cosine beta/variance schedule as discussed in the paper mentioned above
-    pass
+    t = torch.linspace(0, timesteps, timesteps + 1)
+    alpha = torch.cos((t/timesteps + s) / (1 + s) * (torch.pi/2)) **2
+    alpha = alpha / alpha[0]
+    beta = 1 - (alpha[1:]/ alpha[:-1])   # [1:] because at t=1 [:-1] will be 0
+    return torch.clip(beta, 0.0001, 0.9999)
 
 
 def sigmoid_beta_schedule(beta_start, beta_end, timesteps):
