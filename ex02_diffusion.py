@@ -30,8 +30,13 @@ def sigmoid_beta_schedule(beta_start, beta_end, timesteps):
     """
     # TODO (2.3): Implement a sigmoidal beta schedule. Note: identify suitable limits of where you want to sample the sigmoid function.
     # Note that it saturates fairly fast for values -x << 0 << +x
-    pass
-
+    
+    # based on this paper https://arxiv.org/abs/2301.10972
+    v_start = torch.sigmoid(beta_start)
+    v_end = torch.sigmoid(beta_end)
+    output = torch.sigmoid((timesteps * (beta_end - beta_start) + beta_start))
+    output = (v_end - output) / (v_end - v_start)
+    return torch.clip(output, 0.0001, 0.9999)
 
 class Diffusion:
 
