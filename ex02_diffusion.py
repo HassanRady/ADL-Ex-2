@@ -30,13 +30,13 @@ def sigmoid_beta_schedule(beta_start, beta_end, timesteps):
     """
     # TODO (2.3): Implement a sigmoidal beta schedule. Note: identify suitable limits of where you want to sample the sigmoid function.
     # Note that it saturates fairly fast for values -x << 0 << +x
-    
+
     # based on this paper https://arxiv.org/abs/2301.10972
     v_start = torch.sigmoid(beta_start)
     v_end = torch.sigmoid(beta_end)
-    output = torch.sigmoid((timesteps * (beta_end - beta_start) + beta_start))
-    output = (v_end - output) / (v_end - v_start)
-    return torch.clip(output, 0.0001, 0.9999)
+    beta = torch.sigmoid((timesteps * (beta_end - beta_start) + beta_start))
+    beta = (v_end - beta) / (v_end - v_start)
+    return torch.clip(beta, 0.0001, 0.9999)
 
 class Diffusion:
 
@@ -92,12 +92,18 @@ class Diffusion:
     def p_losses(self, denoise_model, x_zero, t, noise=None, loss_type="l1"):
         # TODO (2.2): compute the input to the network using the forward diffusion process and predict the noise using the model; if noise is None, you will need to create a new noise vector, otherwise use the provided one.
 
+        if not noise:
+            noise = torch.rand_like(x_zero)
+
+        x = self.q_sample(x_zero, t, noise)
+        pred = denoise_model(x, t)
+
         if loss_type == 'l1':
             # TODO (2.2): implement an L1 loss for this task
-            loss = None
+            loss = torch.nn.functional.l1_loss(noise, pred)
         elif loss_type == 'l2':
             # TODO (2.2): implement an L2 loss for this task
-            loss = None
+            loss = torch.nn.functional.mse_loss(noise, pred)
         else:
             raise NotImplementedError()
 
