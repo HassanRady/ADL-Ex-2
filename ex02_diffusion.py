@@ -11,16 +11,16 @@ def linear_beta_schedule(beta_start, beta_end, timesteps):
     return torch.linspace(beta_start, beta_end, timesteps)
 
 
-# TODO: Transform into task for students
+# TODO Transform into task for students
 def cosine_beta_schedule(timesteps, s=0.008):
     """
     cosine schedule as proposed in https://arxiv.org/abs/2102.09672
     """
     # TODO (2.3): Implement cosine beta/variance schedule as discussed in the paper mentioned above
     t = torch.linspace(0, timesteps, timesteps + 1)
-    alpha = torch.cos((t/timesteps + s) / (1 + s) * (torch.pi/2)) **2
+    alpha = torch.cos((t/timesteps + s) / (1 + s) * (torch.pi/2)) ** 2
     alpha = alpha / alpha[0]
-    beta = 1 - (alpha[1:]/ alpha[:-1])   # [1:] because at t=1 [:-1] will be 0
+    beta = 1 - (alpha[1:] / alpha[:-1])   # [1:] because at t=1 [:-1] will be 0
     return torch.clip(beta, 0.0001, 0.9999)
 
 
@@ -31,12 +31,19 @@ def sigmoid_beta_schedule(beta_start, beta_end, timesteps):
     # TODO (2.3): Implement a sigmoidal beta schedule. Note: identify suitable limits of where you want to sample the sigmoid function.
     # Note that it saturates fairly fast for values -x << 0 << +x
 
-    # based on this paper https://arxiv.org/abs/2301.10972
-    v_start = torch.sigmoid(beta_start)
-    v_end = torch.sigmoid(beta_end)
-    beta = torch.sigmoid((timesteps * (beta_end - beta_start) + beta_start))
-    beta = (v_end - beta) / (v_end - v_start)
-    return torch.clip(beta, 0.0001, 0.9999)
+    # inspired from this paper https://arxiv.org/abs/2301.10972
+    # v_start = torch.sigmoid(beta_start)
+    # v_end = torch.sigmoid(beta_end)
+    # beta = torch.sigmoid((timesteps * (beta_end - beta_start) + beta_start))
+    # beta = (v_end - beta) / (v_end - v_start)
+    # return torch.clip(beta, 0.0001, 0.9999)
+    t = torch.linspace(0, timesteps, timesteps + 1)
+    s_limit = 6  # from the blog
+    beta = beta_start + \
+        torch.sigmoid(-s_limit + 2*t*s_limit/timesteps) * \
+        (beta_end - beta_start)
+    return beta
+
 
 class Diffusion:
 
@@ -59,9 +66,13 @@ class Diffusion:
 
         # define alphas
         # TODO
+        alpha = 1 - self.betas
+        alphas = torch.cumprod(alpha, axis=0)
 
         # calculations for diffusion q(x_t | x_{t-1}) and others
         # TODO
+        self.x0_coefficient = torch.sqrt(alphas)
+        self.noise_coefficient = torch.sqrt(1 - alphas)
 
         # calculations for posterior q(x_{t-1} | x_t, x_0)
         # TODO
@@ -87,7 +98,17 @@ class Diffusion:
     # forward diffusion (using the nice property)
     def q_sample(self, x_zero, t, noise=None):
         # TODO (2.2): Implement the forward diffusion process using the beta-schedule defined in the constructor; if noise is None, you will need to create a new noise vector, otherwise use the provided one.
-        pass
+        if not noise:
+            noise = torch.rand_like(x_zero)
+
+            self.batch_size = x_zero.shape[0]
+            x0_coefficient_reshaped = self.x0_coefficient.gather(
+                -1, t).reshape(self.batch_size, *((1,) * (len(x_zero.shape) - 1)))
+            noise_coefficient_reshaped = self.noise_coefficient.gather(
+                -1, t).reshape(self.batch_size, *((1,) * (len(x_zero.shape) - 1)))
+
+
+        return x0_coefficient_reshaped * x_zero + noise_coefficient_reshaped * noise
 
     def p_losses(self, denoise_model, x_zero, t, noise=None, loss_type="l1"):
         # TODO (2.2): compute the input to the network using the forward diffusion process and predict the noise using the model; if noise is None, you will need to create a new noise vector, otherwise use the provided one.
