@@ -68,14 +68,22 @@ class Diffusion:
         # TODO
         alpha = 1 - self.betas
         alphas = torch.cumprod(alpha, axis=0)
+        self.one_over_alpha_sqrt = torch.sqrt(1/alpha)
 
         # calculations for diffusion q(x_t | x_{t-1}) and others
         # TODO
-        self.x0_coefficient = torch.sqrt(alphas)
-        self.noise_coefficient = torch.sqrt(1 - alphas)
+        self.alphas_sqrt = torch.sqrt(alphas)
+        self.one_minus_alphas_sqrt = torch.sqrt(1 - alphas)
 
         # calculations for posterior q(x_{t-1} | x_t, x_0)
         # TODO
+        prev_alphas = torch.cat([torch.tensor([1.0]).to(self.device), alphas[:-1]])
+        self.sigma = self.betas * (1 - prev_alphas)/(1 - alphas)
+
+    def get_ts(self, alphas, t, shape):
+        batch_size = t.shape[0]
+        return alphas.gather(
+                -1, t).reshape(batch_size, *((1,) * (len(shape) - 1)))
 
     @torch.no_grad()
     def p_sample(self, model, x, t, t_index):
@@ -83,17 +91,30 @@ class Diffusion:
 
         # Equation 11 in the paper
         # Use our model (noise predictor) to predict the mean
+        ts_betas = self.get_ts(self.betas, t, x.shape)
+        ts_one_minus_alphas_sqrt = self.get_ts(self.one_minus_alphas_sqrt, t, x.shape)
+        ts_one_over_alphas_sqrt = self.get_ts(self.one_over_alpha_sqrt, t, x.shape)
+        mean = ts_one_over_alphas_sqrt * (x - ts_betas * model(x, t) / ts_one_minus_alphas_sqrt)
 
         # TODO (2.2): The method should return the image at timestep t-1.
-        pass
+        if t_index == 0:
+            return mean
+        else:
+            z = torch.randn_like(x)
+            ts_sigma = self.get_ts(self.sigma, t, x.shape).to(self.device)
+            return mean + z * ts_sigma
 
     # Algorithm 2 (including returning all images)
     @torch.no_grad()
     def sample(self, model, image_size, batch_size=16, channels=3):
         # TODO (2.2): Implement the full reverse diffusion loop from random noise to an image, iteratively ''reducing'' the noise in the generated image.
-
+        xs = []
+        x = torch.randn((batch_size, channels, image_size, image_size), device=self.device)
         # TODO (2.2): Return the generated images
-        pass
+        for i in tqdm(reversed(range(0, self.timesteps)), total=self.timesteps):
+            x = self.p_sample(model, x, torch.full((batch_size), i, device=self.device), i)
+            xs.append(x.detach().numpy())
+        return xs
 
     # forward diffusion (using the nice property)
     def q_sample(self, x_zero, t, noise=None):
@@ -101,14 +122,10 @@ class Diffusion:
         if not noise:
             noise = torch.rand_like(x_zero)
 
-            self.batch_size = x_zero.shape[0]
-            x0_coefficient_reshaped = self.x0_coefficient.gather(
-                -1, t).reshape(self.batch_size, *((1,) * (len(x_zero.shape) - 1)))
-            noise_coefficient_reshaped = self.noise_coefficient.gather(
-                -1, t).reshape(self.batch_size, *((1,) * (len(x_zero.shape) - 1)))
+            x0_coefficient = self.get_ts(self.alphas_sqrt, t, x_zero.shape)
+            noise_coefficient = self.get_ts(self.one_minus_alphas_sqrt, t, x_zero.shape)
 
-
-        return x0_coefficient_reshaped * x_zero + noise_coefficient_reshaped * noise
+        return x0_coefficient * x_zero + noise_coefficient * noise
 
     def p_losses(self, denoise_model, x_zero, t, noise=None, loss_type="l1"):
         # TODO (2.2): compute the input to the network using the forward diffusion process and predict the noise using the model; if noise is None, you will need to create a new noise vector, otherwise use the provided one.
