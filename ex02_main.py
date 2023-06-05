@@ -37,9 +37,26 @@ def sample_and_save_images(n_images, diffusor, model, device, store_path):
     pass
 
 
-def test(model, testloader, diffusor, device, args):
+def val(model, testloader, diffusor, epoch, device, args):
     # TODO: Implement - adapt code and method signature as needed
-    pass
+    timesteps = args.timesteps
+
+    pbar = tqdm(testloader)
+    for step, (images, labels) in enumerate(pbar):
+
+        images = images.to(device)
+
+        # Algorithm 1 line 3: sample t uniformly for every example in the batch
+        t = torch.randint(0, timesteps, (len(images),), device=device).long()
+        loss = diffusor.p_losses(model, images, t, loss_type="l2")
+
+        if step % args.log_interval == 0:
+            print('Val Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+                epoch, step * len(images), len(testloader.dataset),
+                100. * step / len(testloader), loss.item()))
+        if args.dry_run:
+            break
+
 
 
 def train(model, trainloader, optimizer, diffusor, epoch, device, args):
@@ -53,8 +70,9 @@ def train(model, trainloader, optimizer, diffusor, epoch, device, args):
         optimizer.zero_grad()
 
         # Algorithm 1 line 3: sample t uniformly for every example in the batch
+        # classes = torch.randint(0, num_classes, (len(images), )).to(device)
         t = torch.randint(0, timesteps, (len(images),), device=device).long()
-        loss = diffusor.p_losses(model, images, t, loss_type="l2")
+        loss = diffusor.p_losses(model, images, t, labels.to(device), loss_type="l2")
 
         loss.backward()
         optimizer.step()
@@ -80,12 +98,6 @@ def run(args):
     batch_size = args.batch_size
     device = "cuda" if not args.no_cuda and torch.cuda.is_available() else "cpu"
 
-    model = Unet(dim=image_size, channels=channels, dim_mults=(1, 2, 4,)).to(device)
-    optimizer = AdamW(model.parameters(), lr=args.lr)
-
-    my_scheduler = lambda x: linear_beta_schedule(0.0001, 0.02, x)
-    diffusor = Diffusion(timesteps, my_scheduler, image_size, device)
-
     # define image transformations (e.g. using torchvision)
     transform = Compose([
         transforms.RandomHorizontalFlip(),
@@ -108,17 +120,24 @@ def run(args):
     # Download and load the test data
     testset = datasets.CIFAR10('/proj/aimi-adl/CIFAR10/', download=True, train=False, transform=transform)
     testloader = DataLoader(testset, batch_size=int(batch_size/2), shuffle=True)
+    
+    global num_classes
+    num_classes = len(dataset.classes)
 
+    model = Unet(dim=image_size, channels=channels, dim_mults=(1, 2, 4,), class_free_guidance=True, num_classes=num_classes).to(device)
+    optimizer = AdamW(model.parameters(), lr=args.lr)
+    my_scheduler = lambda x: linear_beta_schedule(0.0001, 0.02, x)
+    diffusor = Diffusion(timesteps, my_scheduler, image_size, device)
     for epoch in range(epochs):
         train(model, trainloader, optimizer, diffusor, epoch, device, args)
-        test(model, valloader, diffusor, device, args)
+        # val(model, valloader, diffusor, epoch, device, args)
 
-    test(model, testloader, diffusor, device, args)
+    # test(model, testloader, diffusor, device, args)
 
-    save_path = "<path/to/my/images>"  # TODO: Adapt to your needs
+    save_path = "./output"  # TODO: Adapt to your needs
     n_images = 8
-    sample_and_save_images(n_images, diffusor, model, device, save_path)
-    torch.save(model.state_dict(), os.path.join("/proj/aimi-adl/models", args.run_name, f"ckpt.pt"))
+    # sample_and_save_images(n_images, diffusor, model, device, save_path)
+    torch.save(model.state_dict(), "./model.pt")
 
 
 if __name__ == '__main__':

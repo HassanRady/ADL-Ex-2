@@ -68,58 +68,59 @@ class Diffusion:
         self.one_minus_alphas_sqrt = torch.sqrt(1 - alphas)
 
         # calculations for posterior q(x_{t-1} | x_t, x_0)
-        prev_alphas = torch.cat([torch.tensor([1.0]).to(self.device), alphas[:-1]])
+        prev_alphas = torch.cat([torch.tensor([1.0]), alphas[:-1]])
         self.sigma = self.betas * (1 - prev_alphas)/(1 - alphas)
 
     def get_ts(self, alphas, t, shape):
         batch_size = t.shape[0]
         return alphas.gather(
-                -1, t).reshape(batch_size, *((1,) * (len(shape) - 1)))
+                -1, t.cpu()).reshape(batch_size, *((1,) * (len(shape) - 1))).to(self.device)
 
     @torch.no_grad()
-    def p_sample(self, model, x, t, t_index):
+    def p_sample(self, model, x, t, c, t_index):
 
         # Equation 11 in the paper
         # Use our model (noise predictor) to predict the mean
         ts_betas = self.get_ts(self.betas, t, x.shape)
         ts_one_minus_alphas_sqrt = self.get_ts(self.one_minus_alphas_sqrt, t, x.shape)
         ts_one_over_alphas_sqrt = self.get_ts(self.one_over_alpha_sqrt, t, x.shape)
-        mean = ts_one_over_alphas_sqrt * (x - ts_betas * model(x, t) / ts_one_minus_alphas_sqrt)
+        mean = ts_one_over_alphas_sqrt * (x - ts_betas * model(x, t, c) / ts_one_minus_alphas_sqrt)
 
         if t_index == 0:
             return mean
         else:
             z = torch.randn_like(x)
-            ts_sigma = self.get_ts(self.sigma, t, x.shape).to(self.device)
+            ts_sigma = self.get_ts(self.sigma, t, x.shape)
             return mean + z * ts_sigma
 
     # Algorithm 2 (including returning all images)
     @torch.no_grad()
-    def sample(self, model, image_size, batch_size=16, channels=3):
+    def sample(self, model, c, image_size, batch_size=16, channels=3):
         xs = []
         x = torch.randn((batch_size, channels, image_size, image_size), device=self.device)
         for i in tqdm(reversed(range(0, self.timesteps)), total=self.timesteps):
-            x = self.p_sample(model, x, torch.full((batch_size), i, device=self.device), i)
+            t = torch.full((batch_size), i, device=self.device)
+            x = self.p_sample(model, x, t, c, i)
             xs.append(x.detach().numpy())
         return xs
 
     # forward diffusion (using the nice property)
     def q_sample(self, x_zero, t, noise=None):
-        if not noise:
-            noise = torch.rand_like(x_zero)
+        if noise is None:
+            noise = torch.rand_like(x_zero).to(self.device)
 
-            x0_coefficient = self.get_ts(self.alphas_sqrt, t, x_zero.shape)
-            noise_coefficient = self.get_ts(self.one_minus_alphas_sqrt, t, x_zero.shape)
+        x0_coefficient = self.get_ts(self.alphas_sqrt, t, x_zero.shape)
+        noise_coefficient = self.get_ts(self.one_minus_alphas_sqrt, t, x_zero.shape)
 
         return x0_coefficient * x_zero + noise_coefficient * noise
 
-    def p_losses(self, denoise_model, x_zero, t, noise=None, loss_type="l1"):
+    def p_losses(self, denoise_model, x_zero, t, c, noise=None, loss_type="l1"):
 
-        if not noise:
-            noise = torch.rand_like(x_zero)
+        if noise is None:
+            noise = torch.rand_like(x_zero).to(self.device)
 
         x = self.q_sample(x_zero, t, noise)
-        pred = denoise_model(x, t)
+        pred = denoise_model(x, t, c)
 
         if loss_type == 'l1':
             loss = torch.nn.functional.l1_loss(noise, pred)
