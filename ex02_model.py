@@ -230,6 +230,8 @@ class Unet(nn.Module):
                                            nn.GELU(),
                                            nn.Linear(class_dim, class_dim),
                                            )
+        else:
+            class_dim = 0
 
         # layers
         self.downs = nn.ModuleList([])
@@ -296,7 +298,7 @@ class Unet(nn.Module):
             class_emb = self.class_emb(classes)
 
             if self.p_uncond:
-                mask = torch.zeros((batch_size, 1)).uniform_(0, 1) > self.p_uncond
+                mask = torch.zeros((batch_size, 1), device=x.device).uniform_(0, 1) > self.p_uncond
                 null_classes = self.default_class_emb.unsqueeze(0).repeat(batch_size, 1)
                 class_emb = torch.where(mask, class_emb, null_classes)
 
