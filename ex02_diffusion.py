@@ -99,9 +99,9 @@ class Diffusion:
         xs = []
         x = torch.randn((batch_size, channels, image_size, image_size), device=self.device)
         for i in tqdm(reversed(range(0, self.timesteps)), total=self.timesteps):
-            t = torch.full((batch_size), i, device=self.device)
+            t = torch.full((batch_size,), i, device=self.device)
             x = self.p_sample(model, x, t, c, i)
-            xs.append(x.detach().numpy())
+            xs.append(x)
         return xs
 
     # forward diffusion (using the nice property)
